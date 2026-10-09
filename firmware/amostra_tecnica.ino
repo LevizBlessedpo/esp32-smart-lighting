@@ -14,8 +14,10 @@ DHT dht(4, DHT11);
 BluetoothSerial SerialBT; 
 
 // Limiares de luz ambiente (ajustável)
-const int LIMIAR_ESCURO = 1000; // Abaixo disso = LDR sombreado (dedo perto)
-const int LIMIAR_CLARO = 2200;  // Acima disso = LDR com luz normal
+// [CORRIGIDO] O circuito é INVERTIDO: quanto mais escuro, MAIOR o valor.
+// Lanterna = 0 | Luz ambiente = ~2850 | Dedo cobrindo = 4095
+const int LIMIAR_ESCURO = 3400; // ACIMA disso = LDR sombreado (dedo perto)
+const int LIMIAR_CLARO = 3000;  // ABAIXO disso = LDR com luz normal
 
 bool cobertoPeloDedo = false;
 String estadoLCD = "Modo: Automatico";
@@ -41,12 +43,12 @@ void setup() {
   pinMode(PINO_TRANSISTOR, OUTPUT);
   digitalWrite(PINO_TRANSISTOR, HIGH); 
 
-  // Escreve HIGH ANTES de virar OUTPUT, para os relés não darem
-  // um "tranco" ligando por uma fração de segundo ao iniciar
-  digitalWrite(PINO_RELE1, HIGH); 
-  digitalWrite(PINO_RELE2, HIGH);
+  // [CORRIGIDO] Ordem original: primeiro vira OUTPUT, depois escreve HIGH.
+  // (Relés acionados em LOW: HIGH = desligado)
   pinMode(PINO_RELE1, OUTPUT); 
   pinMode(PINO_RELE2, OUTPUT);
+  digitalWrite(PINO_RELE1, HIGH); 
+  digitalWrite(PINO_RELE2, HIGH);
 
   dht.begin(); 
   SerialBT.begin("Rodando na Base da Oração"); 
@@ -72,13 +74,17 @@ void loop() {
   Serial.print("Leitura LDR: ");
   Serial.println(leituraLDR);
 
-  // o botão forçava os relés a cada volta do loop (com delay de 1s),
-  // desfazendo o que o LDR e o Bluetooth faziam. AGORA: o botão só age UMA vez,
-  // no instante em que é apertado, e alterna entre ligar e desligar as lâmpadas.
+  // O botão só age UMA vez, no instante em que é apertado,
+  // e alterna entre ligar e desligar as lâmpadas.
   int leituraButton = digitalRead(PINO_BUTTON);
   if (leituraButton != ultimoEstadoBotao && (millis() - ultimoDebounce) > TEMPO_DEBOUNCE) {
     ultimoDebounce = millis();
     ultimoEstadoBotao = leituraButton;
+
+    // [TESTE] Mostra no Serial quando o botão muda (1 = solto, 0 = apertado).
+    // Pode apagar essas duas linhas depois que o botão estiver funcionando.
+    Serial.print("Botao mudou para: ");
+    Serial.println(leituraButton);
 
     if (leituraButton == LOW) { // botão foi apertado (INPUT_PULLUP: apertado = LOW)
       bool algumaLigada = (digitalRead(PINO_RELE1) == LOW || digitalRead(PINO_RELE2) == LOW);
@@ -94,15 +100,15 @@ void loop() {
     }
   }
 
-  // SE o LDR ficar sombreado (dedo perto): liga ambas as lâmpadas imediatamente
-  if (leituraLDR < LIMIAR_ESCURO && !cobertoPeloDedo) {
+  // [CORRIGIDO] SE o LDR ficar sombreado (valor SOBE, dedo perto): liga as lâmpadas
+  if (leituraLDR > LIMIAR_ESCURO && !cobertoPeloDedo) {
     digitalWrite(PINO_RELE1, LOW);
     digitalWrite(PINO_RELE2, LOW);
     cobertoPeloDedo = true;
     estadoLCD = "LDR: Sombra ON";
   } 
-  // SE a luz voltar (tirou o dedo): desliga as lâmpadas e volta ao normal
-  else if (leituraLDR > LIMIAR_CLARO && cobertoPeloDedo) {
+  // [CORRIGIDO] SE a luz voltar (valor DESCE, tirou o dedo): desliga as lâmpadas
+  else if (leituraLDR < LIMIAR_CLARO && cobertoPeloDedo) {
     digitalWrite(PINO_RELE1, HIGH);
     digitalWrite(PINO_RELE2, HIGH);
     cobertoPeloDedo = false;
@@ -137,7 +143,7 @@ void loop() {
   // -------------------------------------------------------------
   // 3. LEITURA DO DHT11 E EXIBIÇÃO NO LCD
   // -------------------------------------------------------------
-  // leitura do DHT para 2s 
+  // Lê o DHT11 só a cada 2 segundos
   if (millis() - ultimoDHT >= INTERVALO_DHT) {
     ultimoDHT = millis();
     temperatura = dht.readTemperature();
