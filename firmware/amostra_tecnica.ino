@@ -7,35 +7,50 @@
 #define PINO_RELE2 12
 const int PINO_TRANSISTOR = 23;
 const int PINO_LDR = 34;
+const int PINO_BUTTON = 26;
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 DHT dht(4, DHT11); 
 BluetoothSerial SerialBT; 
 
 // Limiares de luz ambiente (ajustável)
-const int LIMIAR_ESCURO = 1000; // Valor com a lanterna cobrindo (ajustado para ser mais sensível)
-const int LIMIAR_CLARO = 2200;  // Valor com luz da lanterna 
+const int LIMIAR_ESCURO = 1000; // Abaixo disso = LDR sombreado (dedo perto)
+const int LIMIAR_CLARO = 2200;  // Acima disso = LDR com luz normal
 
 bool cobertoPeloDedo = false;
 String estadoLCD = "Modo: Automatico";
+
+// Variáveis para controlar o tempo sem usar delay() muito alto
+unsigned long ultimoDHT = 0;
+const unsigned long INTERVALO_DHT = 2000; // 2 segundos de leitura do DHT
+float temperatura = NAN;
+float umidade = NAN;
+
+// Variáveis do push button
+int ultimoEstadoBotao = HIGH;
+unsigned long ultimoDebounce = 0;
+const unsigned long TEMPO_DEBOUNCE = 50;
 
 void setup() {
   Serial.begin(115200); 
   
   pinMode(PINO_LDR, INPUT);
-  
+  pinMode(PINO_BUTTON, INPUT_PULLUP);
+
   // O transistor liga no setup e NUNCA mais desliga a alimentação do LDR
   pinMode(PINO_TRANSISTOR, OUTPUT);
   digitalWrite(PINO_TRANSISTOR, HIGH); 
 
-  pinMode(PINO_RELE1, OUTPUT); 
-  pinMode(PINO_RELE2, OUTPUT);
-  // Inicia relés desligados (Assumindo relés acionados em LOW)
+  // Escreve HIGH ANTES de virar OUTPUT, para os relés não darem
+  // um "tranco" ligando por uma fração de segundo ao iniciar
   digitalWrite(PINO_RELE1, HIGH); 
   digitalWrite(PINO_RELE2, HIGH);
+  pinMode(PINO_RELE1, OUTPUT); 
+  pinMode(PINO_RELE2, OUTPUT);
 
   dht.begin(); 
   SerialBT.begin("Rodando na Base da Oração"); 
+  SerialBT.setTimeout(50);
   
   lcd.init(); 
   lcd.backlight();
@@ -45,20 +60,48 @@ void loop() {
   // -------------------------------------------------------------
   // 1. LEITURA AUTOMÁTICA DO LDR
   // -------------------------------------------------------------
-  int leituraLDR = analogRead(PINO_LDR);
+  // Média de 4 leituras para reduzir oscilação/ruído do LDR
+  long soma = 0;
+  for (int i = 0; i < 4; i++) {
+    soma += analogRead(PINO_LDR);
+    delay(2);
+  }
+  int leituraLDR = soma / 4;
   
   // Valor da luminosidade no monitor serial
   Serial.print("Leitura LDR: ");
   Serial.println(leituraLDR);
 
-  // SE COLOCAR a Lanterna do celular: Liga ambas as lâmpadas imediatamente
+  // o botão forçava os relés a cada volta do loop (com delay de 1s),
+  // desfazendo o que o LDR e o Bluetooth faziam. AGORA: o botão só age UMA vez,
+  // no instante em que é apertado, e alterna entre ligar e desligar as lâmpadas.
+  int leituraButton = digitalRead(PINO_BUTTON);
+  if (leituraButton != ultimoEstadoBotao && (millis() - ultimoDebounce) > TEMPO_DEBOUNCE) {
+    ultimoDebounce = millis();
+    ultimoEstadoBotao = leituraButton;
+
+    if (leituraButton == LOW) { // botão foi apertado (INPUT_PULLUP: apertado = LOW)
+      bool algumaLigada = (digitalRead(PINO_RELE1) == LOW || digitalRead(PINO_RELE2) == LOW);
+      if (algumaLigada) {
+        digitalWrite(PINO_RELE1, HIGH);
+        digitalWrite(PINO_RELE2, HIGH);
+        estadoLCD = "Botao: OFF";
+      } else {
+        digitalWrite(PINO_RELE1, LOW);
+        digitalWrite(PINO_RELE2, LOW);
+        estadoLCD = "Botao: ON";
+      }
+    }
+  }
+
+  // SE o LDR ficar sombreado (dedo perto): liga ambas as lâmpadas imediatamente
   if (leituraLDR < LIMIAR_ESCURO && !cobertoPeloDedo) {
     digitalWrite(PINO_RELE1, LOW);
     digitalWrite(PINO_RELE2, LOW);
     cobertoPeloDedo = true;
-    estadoLCD = "LDR: Dedo (L1+L2)";
+    estadoLCD = "LDR: Sombra ON";
   } 
-  // SE TIRAR a Lanterna do celular: Desliga as lâmpadas e volta ao normal
+  // SE a luz voltar (tirou o dedo): desliga as lâmpadas e volta ao normal
   else if (leituraLDR > LIMIAR_CLARO && cobertoPeloDedo) {
     digitalWrite(PINO_RELE1, HIGH);
     digitalWrite(PINO_RELE2, HIGH);
@@ -94,8 +137,12 @@ void loop() {
   // -------------------------------------------------------------
   // 3. LEITURA DO DHT11 E EXIBIÇÃO NO LCD
   // -------------------------------------------------------------
-  float temperatura = dht.readTemperature();
-  float umidade = dht.readHumidity();
+  // leitura do DHT para 2s 
+  if (millis() - ultimoDHT >= INTERVALO_DHT) {
+    ultimoDHT = millis();
+    temperatura = dht.readTemperature();
+    umidade = dht.readHumidity();
+  }
   
   // Linha 0: Umidade e Temperatura
   lcd.setCursor(0, 0);
@@ -116,10 +163,10 @@ void loop() {
   }
 
   // Linha 1: Status no LCD
+  String linha = estadoLCD;
+  while (linha.length() < 16) linha += " ";
   lcd.setCursor(0, 1);
-  lcd.print("                "); // Limpa a linha
-  lcd.setCursor(0, 1);
-  lcd.print(estadoLCD);
+  lcd.print(linha.substring(0, 16));
 
-  delay(150); // Leitura ultra-rápida (150 milissegundos)
+  delay(100);
 }
