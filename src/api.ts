@@ -1,4 +1,4 @@
-// Endpoint oficial da API REST v1beta
+// Endpoint do repositório da Cloudflare Workers que atua como proxy para a API do Gemini
 const url = "https://gemini-proxy.marcosmcod.workers.dev";
 
 // Função assíncrona para chamar a API do Gemini
