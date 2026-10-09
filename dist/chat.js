@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatBox = document.querySelector('#chat-box');
     function appendMessage(sender, message) {
         const messageElement = document.createElement('div');
-        // Usamos as classes que configuramos no CSS (ex: 'mensagem' e 'usuario' ou 'ia')
+        // Uso das classes do css para estilizar as mensagens de acordo com o remetente
         messageElement.classList.add('mensagem', sender);
         messageElement.textContent = message;
         chatBox.appendChild(messageElement);
